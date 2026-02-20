@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Playwright Recorder",
+  "version": "1.0.0",
+  "description": "Record browser actions and auto-generate Playwright tests with mocks",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "webNavigation"],
+  "host_permissions": ["<all_urls>"],
+  "background": {"service_worker": "background.js"},
+  "devtools_page": "devtools.html",
+  "content_scripts": [
+    {"matches": ["<all_urls>"], "js": ["inject.js"], "run_at": "document_start", "world": "MAIN"},
+    {"matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_start", "all_frames": false}
+  ],
+  "icons": {"16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png"}
+}

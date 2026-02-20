@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Playwright Recorder</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="panel">
+    <header class="header">
+      <h2>🎭 Playwright Recorder</h2>
+      <div id="status" class="status">Ready</div>
+    </header>
+
+    <section class="section folder-picker">
+      <p class="folder-hint">Save opens a new tab where you select the output folder.</p>
+    </section>
+
+    <section class="controls">
+      <button id="btn-start" class="btn btn-primary">▶ Start</button>
+      <button id="btn-stop" class="btn btn-danger" disabled>⏹ Stop</button>
+      <button id="btn-clear" class="btn btn-secondary">Clear</button>
+    </section>
+
+    <section class="stats">
+      <div class="stat-item">
+        Actions: <span id="count-actions">0</span>
+      </div>
+      <div class="stat-item">
+        Mocks: <span id="count-mocks">0</span>
+      </div>
+      <div class="stat-item">
+        Failed: <span id="count-failed">0</span>
+      </div>
+    </section>
+
+    <section id="section-failed" class="section hidden">
+      <h3>⚠️ Failed Requests</h3>
+      <ul id="list-failed"></ul>
+    </section>
+
+    <section class="section">
+      <h3>📦 Mocks (auto-captured)</h3>
+      <ul id="list-mocks"><li class="empty">No mocks captured yet</li></ul>
+    </section>
+
+    <section class="section">
+      <h3>🎯 Actions</h3>
+      <label class="checkbox-label">
+        <input type="checkbox" id="checkbox-capture-all" title="Record all clicks, including non-interactive elements">
+        Capture all clicks
+      </label>
+      <p class="hint">Hover: Shift+1. Scroll: Shift+2.</p>
+      <button id="btn-add-to-test" class="btn btn-primary btn-add-to-test" disabled><span>Add to test</span><span class="btn-arrow">↓</span></button>
+      <ul id="list-actions"><li class="empty">No actions recorded</li></ul>
+    </section>
+
+    <section class="section export">
+      <h3>📁 Export</h3>
+      <input type="text" id="input-testname" placeholder="test-name" value="recorded-test">
+      <p class="export-hint">Select folder above, then Save. Or select code in Preview and Ctrl+C to copy</p>
+      <button id="btn-generate" class="btn btn-primary">Generate</button>
+      <button id="btn-save" class="btn btn-primary">Save</button>
+    </section>
+
+    <section class="section">
+      <h3>👁️ Preview</h3>
+      <pre id="code-preview"></pre>
+    </section>
+  </div>
+
+  <div id="modal-edit" class="modal hidden">
+    <div class="modal-content">
+      <h3>Edit Mock</h3>
+      <div id="edit-url"></div>
+      <div class="form-group">
+        <label>Status:</label>
+        <select id="edit-status">
+          <option value="200">200</option>
+          <option value="201">201</option>
+          <option value="400">400</option>
+          <option value="401">401</option>
+          <option value="404">404</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Body (JSON)</label>
+        <textarea id="edit-body" rows="8"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-save-mock" class="btn btn-primary">Save</button>
+        <button id="btn-cancel-edit" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-expect" class="modal hidden">
+    <div class="modal-content modal-expect-content">
+      <h3 id="modal-expect-title">Add Expect</h3>
+      <div id="modal-expect-body"></div>
+      <div class="modal-expect-actions">
+        <div class="modal-expect-add-btns">
+          <button id="btn-expect-add-assertion" class="btn btn-secondary">+ Add assertion</button>
+          <button id="btn-expect-add-custom" class="btn btn-secondary">+ Add custom</button>
+        </div>
+        <div class="modal-actions">
+          <button id="btn-expect-save" class="btn btn-primary">Save</button>
+          <button id="btn-expect-cancel" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="panel.js"></script>
+</body>
+</html>
