@@ -4,3 +4,9 @@ PLAN.md
 PROMPTS.md
 node_modules/
 dist/
+.background.js
+.content.js
+.panel.js
+.inject.js
+.devtools.js
+.picker.js

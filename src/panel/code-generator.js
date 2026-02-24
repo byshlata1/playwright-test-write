@@ -80,13 +80,13 @@ export function locatorMethodStr(info) {
     case 'testId':
       return info.value ? `getByTestId('${escapeForPlaywright(info.value)}')` + suffix : '';
     case 'text':
-      return info.text ? `getByText('${escapeForPlaywright(info.text)}')` + suffix : '';
+      return info.text ? `getByText('${escapeForPlaywright(info.text)}', { exact: true })` + suffix : '';
     case 'css':
       return info.selector ? `locator('${escapeForPlaywright(info.selector)}')` + suffix : '';
     case 'rowCell': {
       if (!info.rowText) return '';
-      let chain = `getByText('${escapeForPlaywright(info.rowText)}')`;
-      if (info.cellText) chain += `.getByText('${escapeForPlaywright(info.cellText)}')`;
+      let chain = `getByText('${escapeForPlaywright(info.rowText)}', { exact: true })`;
+      if (info.cellText) chain += `.getByText('${escapeForPlaywright(info.cellText)}', { exact: true })`;
       else if (info.dataIndex) chain += `.locator('[data-index="${escapeForPlaywright(info.dataIndex)}"]')`;
       return chain + suffix;
     }

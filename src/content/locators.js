@@ -75,8 +75,14 @@ export function getLabelForFormControl(el) {
   return null;
 }
 
+const _textUniqueCache = new Map();
+const _textCacheObserver = new MutationObserver(() => { _textUniqueCache.clear(); });
+_textCacheObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+
 function isTextUnique(text) {
   if (!text || text.length > 150) return false;
+  const cached = _textUniqueCache.get(text);
+  if (cached !== undefined) return cached;
   const all = document.querySelectorAll('*:not(script):not(style)');
   let count = 0;
   for (let i = 0; i < all.length; i++) {
@@ -89,9 +95,11 @@ function isTextUnique(text) {
       if (ct === text) { ownedByChild = true; break; }
     }
     if (!ownedByChild) count++;
-    if (count > 1) return false;
+    if (count > 1) { _textUniqueCache.set(text, false); return false; }
   }
-  return count === 1;
+  const result = count === 1;
+  _textUniqueCache.set(text, result);
+  return result;
 }
 
 const _cssFallbackMaxDepth = 8;
@@ -108,6 +116,9 @@ function generateCssFallback(element) {
       const classes = el.className.trim().split(/\s+/).filter(function (c) {
         if (!c || /^\d/.test(c)) return false;
         if (/_[a-z0-9]{4,}$/i.test(c)) return false;
+        if (/^css-[a-z0-9]+$/i.test(c)) return false;
+        if (/^sc-[a-zA-Z]/.test(c)) return false;
+        if (/--[a-z0-9]{5,}$/i.test(c)) return false;
         return true;
       });
       if (classes.length) part += '.' + classes.slice(0, 2).join('.');
@@ -273,11 +284,11 @@ export function locatorInfoToText(info) {
     case 'testId':
       return "getByTestId('" + info.value + "')" + nthSuffix;
     case 'text':
-      return "getByText('" + (info.text.length > 40 ? info.text.slice(0, 37) + '...' : info.text) + "')" + nthSuffix;
+      return "getByText('" + info.text + "', { exact: true })" + nthSuffix;
     case 'css':
-      return "locator('" + (info.selector.length > 50 ? info.selector.slice(0, 47) + '...' : info.selector) + "')" + nthSuffix;
+      return "locator('" + info.selector + "')" + nthSuffix;
     case 'rowCell':
-      return (info.rowText ? "getByText('" + (info.rowText.length > 35 ? info.rowText.slice(0, 32) + '...' : info.rowText) + "')" : '') + (info.cellText ? ".getByText('" + (info.cellText.length > 35 ? info.cellText.slice(0, 32) + '...' : info.cellText) + "')" : (info.dataIndex ? ".locator('[data-index=\"" + info.dataIndex + "\"]')" : ''));
+      return (info.rowText ? "getByText('" + info.rowText + "', { exact: true })" : '') + (info.cellText ? ".getByText('" + info.cellText + "', { exact: true })" : (info.dataIndex ? ".locator('[data-index=\"" + info.dataIndex + "\"]')" : ''));
     default:
       return '';
   }
@@ -345,6 +356,31 @@ export function getHighlightInfo(el) {
   if (!elInfo || !elInfo.locatorInfo) {
     const fb = generateCssFallback(el);
     return { target: el, text: "locator('" + (fb || el.tagName.toLowerCase()) + "')", method: 'css', locatorInfo: { method: 'css', selector: fb }, innerLocatorInfo: null, selector: fb };
+  }
+
+  if (elInfo.locatorInfo.method === 'testId') {
+    const elOwnTestId = el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test-id'));
+    if (elOwnTestId) {
+      const tag = (el.tagName || '').toLowerCase();
+      const isInteractive = tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea';
+      if (!isInteractive) {
+        let parent = el.parentElement;
+        while (parent && parent.nodeType === 1 && parent.tagName !== 'BODY' && parent.tagName !== 'HTML') {
+          const ptid = parent.getAttribute && (parent.getAttribute('data-testid') || parent.getAttribute('data-test-id'));
+          if (ptid) {
+            const parentInfo = generateLocatorInfo(parent);
+            if (parentInfo && parentInfo.locatorInfo && parentInfo.locatorInfo.method === 'testId') {
+              const pText = locatorInfoToText(parentInfo.locatorInfo);
+              if (pText) return { target: parent, text: pText, method: 'testId', locatorInfo: parentInfo.locatorInfo, innerLocatorInfo: null, selector: parentInfo.selector };
+            }
+            break;
+          }
+          parent = parent.parentElement;
+        }
+      }
+    }
+    const tidText = locatorInfoToText(elInfo.locatorInfo);
+    if (tidText) return { target: el, text: tidText, method: 'testId', locatorInfo: elInfo.locatorInfo, innerLocatorInfo: null, selector: elInfo.selector };
   }
 
   const scope = findScope(el);
