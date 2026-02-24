@@ -64,6 +64,17 @@ header h2 {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.testid-check-label {
+  margin-left: auto;
+  margin-bottom: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  color: #2e7d32;
+  font-weight: 500;
 }
 
 button {
