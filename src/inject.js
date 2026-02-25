@@ -89,3 +89,33 @@ window.addEventListener('message', function (e) {
     window.RECORDING = false;
   }
 });
+
+var origPushState = history.pushState.bind(history);
+history.pushState = function() {
+  origPushState.apply(history, arguments);
+  if (window.RECORDING) {
+    var url = arguments[2];
+    if (url) {
+      var resolved = new URL(url, location.href).href;
+      window.postMessage({ type: 'SPA_NAVIGATION', url: resolved }, '*');
+    }
+  }
+};
+
+var origReplaceState = history.replaceState.bind(history);
+history.replaceState = function() {
+  origReplaceState.apply(history, arguments);
+  if (window.RECORDING) {
+    var url = arguments[2];
+    if (url) {
+      var resolved = new URL(url, location.href).href;
+      window.postMessage({ type: 'SPA_NAVIGATION', url: resolved }, '*');
+    }
+  }
+};
+
+window.addEventListener('popstate', function() {
+  if (window.RECORDING) {
+    window.postMessage({ type: 'SPA_NAVIGATION', url: location.href }, '*');
+  }
+});

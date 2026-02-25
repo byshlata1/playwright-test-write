@@ -60,8 +60,12 @@ chrome.runtime.sendMessage({ type: 'GET_STATE' }, function (state) {
 window.addEventListener(
   'message',
   function (e) {
-    if (e.source !== window || e.data?.type !== 'REQUEST_CAPTURED_PAGE') return;
-    chrome.runtime.sendMessage({ type: 'REQUEST_CAPTURED', data: e.data.data }).catch(e => console.warn('[PW Recorder]', e));
+    if (e.source !== window || !e.data) return;
+    if (e.data.type === 'REQUEST_CAPTURED_PAGE') {
+      chrome.runtime.sendMessage({ type: 'REQUEST_CAPTURED', data: e.data.data }).catch(e => console.warn('[PW Recorder]', e));
+    } else if (e.data.type === 'SPA_NAVIGATION' && contentState.recording) {
+      chrome.runtime.sendMessage({ type: 'SPA_NAVIGATION', url: e.data.url }).catch(e => console.warn('[PW Recorder]', e));
+    }
   },
   false
 );

@@ -4,7 +4,49 @@ export function escapeSelectorAttr(s) {
   return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+export function parentElementOrShadowHost(el) {
+  if (!el) return null;
+  if (el.parentElement) return el.parentElement;
+  if (el.parentNode && el.parentNode.nodeType === 11) return el.parentNode.host || null;
+  return null;
+}
+
+function isGuidLike(id) {
+  if (!id || id.length < 4) return false;
+  let lastType = '';
+  let transitions = 0;
+  for (let i = 0; i < id.length; i++) {
+    const c = id[i];
+    if (c === '-' || c === '_') continue;
+    let type;
+    if (c >= 'a' && c <= 'z') type = 'lower';
+    else if (c >= 'A' && c <= 'Z') type = 'upper';
+    else if (c >= '0' && c <= '9') type = 'digit';
+    else type = 'other';
+    if (type === 'lower' && lastType === 'upper') { lastType = type; continue; }
+    if (lastType && lastType !== type) transitions++;
+    lastType = type;
+  }
+  return transitions >= id.length / 4;
+}
+
+function trimWordBoundary(text, maxLength) {
+  if (text.length <= maxLength) return text;
+  text = text.substring(0, maxLength);
+  const match = text.match(/^(.*)\b(.+?)$/);
+  if (!match) return '';
+  return match[1].trimEnd();
+}
+
 export function getAccessibleName(el) {
+  const labelledBy = el.getAttribute && el.getAttribute('aria-labelledby');
+  if (labelledBy) {
+    const names = labelledBy.split(/\s+/).map(function (id) {
+      const ref = document.getElementById(id);
+      return ref ? (ref.textContent || '').trim() : '';
+    }).filter(Boolean);
+    if (names.length) return names.join(' ');
+  }
   const ariaLabel = el.getAttribute && el.getAttribute('aria-label');
   if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
   const tag = (el.tagName && el.tagName.toLowerCase()) || '';
@@ -76,11 +118,12 @@ export function getLabelForFormControl(el) {
 }
 
 const _textUniqueCache = new Map();
-const _textCacheObserver = new MutationObserver(() => { _textUniqueCache.clear(); });
-_textCacheObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+const _matchCountCache = new Map();
+const _domCacheObserver = new MutationObserver(() => { _textUniqueCache.clear(); _matchCountCache.clear(); });
+_domCacheObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
 
 function isTextUnique(text) {
-  if (!text || text.length > 150) return false;
+  if (!text || text.length > 200) return false;
   const cached = _textUniqueCache.get(text);
   if (cached !== undefined) return cached;
   const all = document.querySelectorAll('*:not(script):not(style)');
@@ -102,11 +145,60 @@ function isTextUnique(text) {
   return result;
 }
 
+function isTextUniqueInScope(text, scope) {
+  if (!text || !scope) return false;
+  const all = scope.querySelectorAll('*:not(script):not(style)');
+  let count = 0;
+  for (let i = 0; i < all.length; i++) {
+    const t = all[i].textContent && all[i].textContent.trim().replace(/\s+/g, ' ');
+    if (t !== text) continue;
+    let ownedByChild = false;
+    for (let j = 0; j < all[i].children.length; j++) {
+      const ct = all[i].children[j].textContent && all[i].children[j].textContent.trim().replace(/\s+/g, ' ');
+      if (ct === text) { ownedByChild = true; break; }
+    }
+    if (!ownedByChild) count++;
+    if (count > 1) return false;
+  }
+  return count === 1;
+}
+
+function suitableTextAlternatives(text) {
+  if (!text) return [];
+  const results = [];
+
+  const leadMatch = text.match(/^[\d.,]+\s*/);
+  if (leadMatch && leadMatch[0].length < text.length) {
+    const alt = text.substring(leadMatch[0].length);
+    if (alt.length >= 2 && alt.length <= 80) results.push(alt);
+  }
+
+  const trailMatch = text.match(/\s*[\d.,]+$/);
+  if (trailMatch && trailMatch.index > 0) {
+    const alt = text.substring(0, trailMatch.index);
+    if (alt.length >= 2 && alt.length <= 80) results.push(alt);
+  }
+
+  if (text.length <= 80) {
+    results.push(text);
+  } else {
+    const trimmed = trimWordBoundary(text, 80);
+    if (trimmed && trimmed.length >= 2) results.push(trimmed);
+  }
+
+  const seen = new Set();
+  return results.filter(function (r) {
+    if (seen.has(r)) return false;
+    seen.add(r);
+    return true;
+  });
+}
+
 const _cssFallbackMaxDepth = 8;
 function generateCssFallback(element) {
   let el = element;
   const id = el.getAttribute && el.getAttribute('id');
-  if (id && /^[a-zA-Z_-][\w-]*$/.test(id)) return '#' + id;
+  if (id && /^[a-zA-Z_-][\w-]*$/.test(id) && !isGuidLike(id)) return '#' + id;
 
   const path = [];
   let depth = 0;
@@ -119,6 +211,7 @@ function generateCssFallback(element) {
         if (/^css-[a-z0-9]+$/i.test(c)) return false;
         if (/^sc-[a-zA-Z]/.test(c)) return false;
         if (/--[a-z0-9]{5,}$/i.test(c)) return false;
+        if (isGuidLike(c)) return false;
         return true;
       });
       if (classes.length) part += '.' + classes.slice(0, 2).join('.');
@@ -190,6 +283,104 @@ function getNthAmongSiblings(el) {
   return null;
 }
 
+const LOCATABLE_ROLES = new Set([
+  'button', 'link', 'checkbox', 'radio', 'textbox', 'searchbox', 'combobox',
+  'heading', 'menuitem', 'tab', 'option', 'img', 'table', 'list'
+]);
+
+function getRoleCSSHint(role) {
+  switch (role) {
+    case 'button': return 'button,[role="button"],input[type="submit"],input[type="button"],input[type="image"],summary';
+    case 'link': return 'a[href],[role="link"]';
+    case 'checkbox': return 'input[type="checkbox"],[role="checkbox"]';
+    case 'radio': return 'input[type="radio"],[role="radio"]';
+    case 'textbox': return 'input:not([type]),input[type="text"],input[type="email"],input[type="password"],input[type="tel"],input[type="url"],textarea,[role="textbox"]';
+    case 'searchbox': return 'input[type="search"],[role="searchbox"]';
+    case 'combobox': return 'select,[role="combobox"]';
+    case 'heading': return 'h1,h2,h3,h4,h5,h6,[role="heading"]';
+    case 'menuitem': return '[role="menuitem"]';
+    case 'tab': return '[role="tab"]';
+    case 'option': return 'option,[role="option"]';
+    case 'img': return 'img,[role="img"]';
+    case 'table': return 'table,[role="table"]';
+    case 'list': return 'ul,ol,[role="list"]';
+    default: return '[role="' + role + '"]';
+  }
+}
+
+function _matchCacheKey(info) {
+  switch (info.method) {
+    case 'testId': return 'tid|' + info.value;
+    case 'role': return 'role|' + info.role + '|' + (info.name || '') + '|' + (info.level != null ? info.level : '');
+    case 'label': return 'label|' + info.label;
+    case 'placeholder': return 'ph|' + info.placeholder;
+    case 'alt': return 'alt|' + info.alt;
+    case 'title': return 'title|' + info.title;
+    default: return '';
+  }
+}
+
+function countLocatorMatches(info) {
+  const cacheKey = _matchCacheKey(info);
+  if (cacheKey) {
+    const cached = _matchCountCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+  }
+  let result;
+  switch (info.method) {
+    case 'testId': {
+      const attr = info.attr || 'data-testid';
+      result = document.querySelectorAll('[' + attr + '="' + escapeSelectorAttr(info.value) + '"]').length;
+      break;
+    }
+    case 'role': {
+      const hint = getRoleCSSHint(info.role);
+      let candidates;
+      try { candidates = document.querySelectorAll(hint); } catch (_) { candidates = document.querySelectorAll('*'); }
+      let count = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        const el = candidates[i];
+        if (getImplicitRole(el) !== info.role) continue;
+        if (info.name && getAccessibleName(el) !== info.name) continue;
+        if (info.level != null && getHeadingLevel((el.tagName || '').toLowerCase()) !== info.level) continue;
+        count++;
+        if (count > 1) break;
+      }
+      result = count;
+      break;
+    }
+    case 'label': {
+      const controls = document.querySelectorAll('input,select,textarea');
+      let count = 0;
+      for (let i = 0; i < controls.length; i++) {
+        if (getLabelForFormControl(controls[i]) === info.label) {
+          count++;
+          if (count > 1) break;
+        }
+      }
+      result = count;
+      break;
+    }
+    case 'placeholder': {
+      const sel = 'input[placeholder="' + escapeSelectorAttr(info.placeholder) + '"],textarea[placeholder="' + escapeSelectorAttr(info.placeholder) + '"]';
+      try { result = document.querySelectorAll(sel).length; } catch (_) { result = 0; }
+      break;
+    }
+    case 'alt': {
+      try { result = document.querySelectorAll('[alt="' + escapeSelectorAttr(info.alt) + '"]').length; } catch (_) { result = 0; }
+      break;
+    }
+    case 'title': {
+      try { result = document.querySelectorAll('[title="' + escapeSelectorAttr(info.title) + '"]').length; } catch (_) { result = 0; }
+      break;
+    }
+    default:
+      result = 1;
+  }
+  if (cacheKey) _matchCountCache.set(cacheKey, result);
+  return result;
+}
+
 export function generateLocatorInfo(element) {
   if (!element || !element.tagName) return { locatorInfo: null, selector: null };
 
@@ -205,35 +396,96 @@ export function generateLocatorInfo(element) {
   const label = getLabelForFormControl(element);
   const text = (element.textContent && element.textContent.trim().replace(/\s+/g, ' ')) || '';
 
-  let locatorInfo = null;
+  const candidates = [];
   const nthInfo = getNthAmongSiblings(element);
 
   if (testId) {
     const attr = element.hasAttribute('data-test-id') ? 'data-test-id' : 'data-testid';
-    locatorInfo = { method: 'testId', value: testId, attr: attr };
-    if (nthInfo && nthInfo.testId === testId) locatorInfo.nthIndex = nthInfo.index;
+    const info = { method: 'testId', value: testId, attr: attr };
+    if (nthInfo && nthInfo.testId === testId) info.nthIndex = nthInfo.index;
+    candidates.push(info);
   }
 
-  if (!locatorInfo && role && (role === 'button' || role === 'link' || role === 'checkbox' || role === 'radio' || role === 'textbox' || role === 'searchbox' || role === 'combobox' || role === 'heading' || role === 'menuitem' || role === 'tab' || role === 'option' || role === 'img' || role === 'table' || role === 'list')) {
+  let roleHasName = false;
+  if (role && LOCATABLE_ROLES.has(role)) {
     const headingLevel = getHeadingLevel(tag);
     if (role === 'heading' && headingLevel) {
-      if (name && name.length <= 60) locatorInfo = { method: 'role', role: role, name: name, level: headingLevel };
-      else locatorInfo = { method: 'role', role: role, level: headingLevel };
-    } else if (name && name.length <= 60) {
-      locatorInfo = { method: 'role', role: role, name: name };
+      if (name && name.length <= 80) { candidates.push({ method: 'role', role: role, name: name, level: headingLevel }); roleHasName = true; }
+      else candidates.push({ method: 'role', role: role, level: headingLevel });
+    } else if (name && name.length <= 80) {
+      candidates.push({ method: 'role', role: role, name: name });
+      roleHasName = true;
     } else if (role === 'table' || role === 'list') {
-      locatorInfo = { method: 'role', role: role, name: name || undefined };
+      candidates.push({ method: 'role', role: role, name: name || undefined });
+      if (name) roleHasName = true;
     } else if (role === 'textbox' || role === 'searchbox' || role === 'combobox') {
-      locatorInfo = { method: 'role', role: role, name: label || undefined };
+      candidates.push({ method: 'role', role: role, name: label || undefined });
+      if (label) roleHasName = true;
+    } else {
+      candidates.push({ method: 'role', role: role });
     }
   }
 
-  if (!locatorInfo && label && (tag === 'input' || tag === 'select' || tag === 'textarea')) {
-    locatorInfo = { method: 'label', label: label };
+  if (label && (tag === 'input' || tag === 'select' || tag === 'textarea')) {
+    if (!roleHasName || label !== name) {
+      candidates.push({ method: 'label', label: label });
+    }
   }
 
-  if (!locatorInfo && text && text.length <= 60 && isTextUnique(text)) {
-    locatorInfo = { method: 'text', text: text };
+  if (tag === 'input' || tag === 'textarea') {
+    const ph = element.getAttribute && element.getAttribute('placeholder');
+    if (ph && ph.trim()) candidates.push({ method: 'placeholder', placeholder: ph.trim() });
+  }
+
+  if (tag === 'img' || (tag === 'input' && (element.type || '').toLowerCase() === 'image')) {
+    const alt = element.getAttribute && element.getAttribute('alt');
+    if (alt && alt.trim()) candidates.push({ method: 'alt', alt: alt.trim() });
+  }
+
+  {
+    const titleAttr = element.getAttribute && element.getAttribute('title');
+    if (titleAttr && titleAttr.trim() && titleAttr.trim().length <= 80) {
+      candidates.push({ method: 'title', title: titleAttr.trim() });
+    }
+  }
+
+  if (text && !isGuidLike(text)) {
+    const alts = suitableTextAlternatives(text);
+    for (let i = 0; i < alts.length; i++) {
+      if (!isGuidLike(alts[i]) && isTextUnique(alts[i])) {
+        candidates.push({ method: 'text', text: alts[i] });
+        break;
+      }
+    }
+  }
+
+  let locatorInfo = null;
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
+    if (candidate.method === 'text') continue;
+    if (candidate.method === 'testId') {
+      const matchCount = countLocatorMatches(candidate);
+      if (matchCount > 1 && typeof candidate.nthIndex !== 'number') {
+        const attr = candidate.attr || 'data-testid';
+        try {
+          const all = document.querySelectorAll('[' + attr + '="' + escapeSelectorAttr(candidate.value) + '"]');
+          for (let j = 0; j < all.length; j++) {
+            if (all[j] === element) { candidate.nthIndex = j; break; }
+          }
+        } catch (_) {}
+      }
+      locatorInfo = candidate;
+      break;
+    }
+    if (countLocatorMatches(candidate) === 1) {
+      locatorInfo = candidate;
+      break;
+    }
+  }
+  if (!locatorInfo) {
+    for (let i = 0; i < candidates.length; i++) {
+      if (candidates[i].method === 'text') { locatorInfo = candidates[i]; break; }
+    }
   }
 
   if (!locatorInfo) {
@@ -268,7 +520,11 @@ export function locatorInfoToText(info) {
   if (!info || !info.method) return '';
   const nthSuffix = (typeof info.nthIndex === 'number' && info.nthIndex >= 0) ? '.nth(' + info.nthIndex + ')' : '';
   if (info.method === 'nthChild') {
-    const base = ".locator('" + (info.childSelector || '> *') + "')" + (typeof info.nthIndex === 'number' ? '.nth(' + info.nthIndex + ')' : '');
+    if (info.filterText) {
+      const base = "locator('" + (info.childSelector || '> *') + "').filter({ hasText: '" + info.filterText + "' })";
+      return base + (info.inner ? '.' + locatorInfoToText(info.inner) : '');
+    }
+    const base = "locator('" + (info.childSelector || '> *') + "')" + (typeof info.nthIndex === 'number' ? '.nth(' + info.nthIndex + ')' : '');
     return base + (info.inner ? '.' + locatorInfoToText(info.inner) : '');
   }
   switch (info.method) {
@@ -283,6 +539,12 @@ export function locatorInfoToText(info) {
       return "getByLabel('" + info.label + "')" + nthSuffix;
     case 'testId':
       return "getByTestId('" + info.value + "')" + nthSuffix;
+    case 'placeholder':
+      return "getByPlaceholder('" + info.placeholder + "')" + nthSuffix;
+    case 'alt':
+      return "getByAltText('" + info.alt + "')" + nthSuffix;
+    case 'title':
+      return "getByTitle('" + info.title + "')" + nthSuffix;
     case 'text':
       return "getByText('" + info.text + "', { exact: true })" + nthSuffix;
     case 'css':
@@ -295,14 +557,14 @@ export function locatorInfoToText(info) {
 }
 
 function findScope(el) {
-  let check = el.parentElement;
+  let check = parentElementOrShadowHost(el);
   while (check && check.nodeType === 1) {
     if (check.tagName === 'BODY' || check.tagName === 'HTML') return null;
     const tid = check.getAttribute && (check.getAttribute('data-testid') || check.getAttribute('data-test-id'));
     const tag = (check.tagName && check.tagName.toLowerCase()) || '';
     if (tid || tag === 'button' || tag === 'a') return check;
     if (tag === 'table' || tag === 'tbody' || tag === 'ul' || tag === 'ol' || tag === 'select') return check;
-    check = check.parentElement;
+    check = parentElementOrShadowHost(check);
   }
   return null;
 }
@@ -317,7 +579,7 @@ export function findBestChildLocator(el) {
         return { method: 'testId', value: tid, attr: child.hasAttribute('data-test-id') ? 'data-test-id' : 'data-testid' };
       }
       const text = child.textContent && child.textContent.trim().replace(/\s+/g, ' ');
-      if (text && text.length > 0 && text.length <= 60 && isTextUnique(text)) {
+      if (text && text.length > 0 && text.length <= 80 && !isGuidLike(text) && isTextUnique(text)) {
         return { method: 'text', text: text };
       }
       if (maxDepth > 0 && child.children && child.children.length > 0) {
@@ -348,8 +610,20 @@ function findRowCellLocator(el, scope) {
   return null;
 }
 
+function _findFilterText(rowEl) {
+  if (!rowEl || !rowEl.children) return null;
+  for (let i = 0; i < rowEl.children.length; i++) {
+    const child = rowEl.children[i];
+    const t = child.textContent && child.textContent.trim().replace(/\s+/g, ' ');
+    if (t && t.length >= 2 && t.length <= 50 && !isGuidLike(t) && isTextUnique(t)) return t;
+  }
+  const full = rowEl.textContent && rowEl.textContent.trim().replace(/\s+/g, ' ');
+  if (full && full.length >= 2 && full.length <= 50 && !isGuidLike(full) && isTextUnique(full)) return full;
+  return null;
+}
+
 export function getHighlightInfo(el) {
-  while (el && el instanceof SVGElement) el = el.parentElement;
+  while (el && el instanceof SVGElement) el = parentElementOrShadowHost(el);
   if (!el || el.tagName === 'HTML' || el.tagName === 'BODY') return null;
 
   const elInfo = generateLocatorInfo(el);
@@ -358,25 +632,26 @@ export function getHighlightInfo(el) {
     return { target: el, text: "locator('" + (fb || el.tagName.toLowerCase()) + "')", method: 'css', locatorInfo: { method: 'css', selector: fb }, innerLocatorInfo: null, selector: fb };
   }
 
-  if (elInfo.locatorInfo.method === 'testId') {
-    const elOwnTestId = el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test-id'));
-    if (elOwnTestId) {
-      const tag = (el.tagName || '').toLowerCase();
-      const isInteractive = tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea';
-      if (!isInteractive) {
-        let parent = el.parentElement;
-        while (parent && parent.nodeType === 1 && parent.tagName !== 'BODY' && parent.tagName !== 'HTML') {
-          const ptid = parent.getAttribute && (parent.getAttribute('data-testid') || parent.getAttribute('data-test-id'));
-          if (ptid) {
-            const parentInfo = generateLocatorInfo(parent);
-            if (parentInfo && parentInfo.locatorInfo && parentInfo.locatorInfo.method === 'testId') {
-              const pText = locatorInfoToText(parentInfo.locatorInfo);
-              if (pText) return { target: parent, text: pText, method: 'testId', locatorInfo: parentInfo.locatorInfo, innerLocatorInfo: null, selector: parentInfo.selector };
-            }
-            break;
+  const elOwnTestId = el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test-id'));
+
+  if (elInfo.locatorInfo.method === 'testId' && elOwnTestId) {
+    const tag = (el.tagName || '').toLowerCase();
+    const elRole = el.getAttribute && el.getAttribute('role');
+    const isInteractive = tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea' ||
+      (elRole && /^(button|link|checkbox|radio|combobox|listbox|tab|menuitem|option|switch|slider)$/.test(elRole));
+    if (!isInteractive) {
+      let parent = parentElementOrShadowHost(el);
+      while (parent && parent.nodeType === 1 && parent.tagName !== 'BODY' && parent.tagName !== 'HTML') {
+        const ptid = parent.getAttribute && (parent.getAttribute('data-testid') || parent.getAttribute('data-test-id'));
+        if (ptid) {
+          const parentInfo = generateLocatorInfo(parent);
+          if (parentInfo && parentInfo.locatorInfo && parentInfo.locatorInfo.method === 'testId') {
+            const pText = locatorInfoToText(parentInfo.locatorInfo);
+            if (pText) return { target: parent, text: pText, method: 'testId', locatorInfo: parentInfo.locatorInfo, innerLocatorInfo: null, selector: parentInfo.selector };
           }
-          parent = parent.parentElement;
+          break;
         }
+        parent = parentElementOrShadowHost(parent);
       }
     }
     const tidText = locatorInfoToText(elInfo.locatorInfo);
@@ -400,15 +675,50 @@ export function getHighlightInfo(el) {
           }
           const containerInfo = generateLocatorInfo(containerScope);
           if (containerInfo && containerInfo.locatorInfo && containerInfo.locatorInfo.method !== 'css') {
-            const nthChildInner = { method: 'nthChild', childSelector: childSelector, nthIndex: nthCtx.index };
             const sameTag = Array.from(nthCtx.container.children).filter(function (c) { return (c.tagName && c.tagName.toLowerCase()) === nthCtx.childTag; });
             const rowEl = sameTag[nthCtx.index];
+            let nthChildInner;
+            if (rowEl) {
+              const ft = _findFilterText(rowEl);
+              if (ft) nthChildInner = { method: 'nthChild', childSelector: childSelector, filterText: ft };
+              else nthChildInner = { method: 'nthChild', childSelector: childSelector, nthIndex: nthCtx.index };
+            } else {
+              nthChildInner = { method: 'nthChild', childSelector: childSelector, nthIndex: nthCtx.index };
+            }
             if (el === rowEl || (rowEl && rowEl.contains(el))) {
               let innerLoc = nthChildInner;
               if (el !== rowEl) {
                 const elInRowInfo = generateLocatorInfo(el);
                 if (elInRowInfo && elInRowInfo.locatorInfo && elInRowInfo.locatorInfo.method !== 'css') {
-                  innerLoc = { method: 'nthChild', childSelector: nthChildInner.childSelector, nthIndex: nthChildInner.nthIndex, inner: elInRowInfo.locatorInfo };
+                  innerLoc = nthChildInner.filterText
+                    ? { method: 'nthChild', childSelector: nthChildInner.childSelector, filterText: nthChildInner.filterText, inner: elInRowInfo.locatorInfo }
+                    : { method: 'nthChild', childSelector: nthChildInner.childSelector, nthIndex: nthChildInner.nthIndex, inner: elInRowInfo.locatorInfo };
+                } else {
+                  const elText = (el.textContent && el.textContent.trim().replace(/\s+/g, ' ')) || '';
+                  if (elText && elText.length <= 80 && !isGuidLike(elText) && isTextUniqueInScope(elText, rowEl)) {
+                    const textInner = { method: 'text', text: elText };
+                    innerLoc = nthChildInner.filterText
+                      ? { method: 'nthChild', childSelector: nthChildInner.childSelector, filterText: nthChildInner.filterText, inner: textInner }
+                      : { method: 'nthChild', childSelector: nthChildInner.childSelector, nthIndex: nthChildInner.nthIndex, inner: textInner };
+                  } else {
+                    let cell = el;
+                    while (cell && cell.parentElement && cell.parentElement !== rowEl) cell = cell.parentElement;
+                    if (cell && cell.parentElement === rowEl) {
+                      const cellTag = (cell.tagName || '').toLowerCase();
+                      if (cellTag === 'td' || cellTag === 'th') {
+                        const sameCells = Array.from(rowEl.children).filter(function (c) { return (c.tagName || '').toLowerCase() === cellTag; });
+                        if (sameCells.length >= 2) {
+                          const cellIdx = sameCells.indexOf(cell);
+                          if (cellIdx >= 0) {
+                            const cellInner = { method: 'nthChild', childSelector: '> ' + cellTag, nthIndex: cellIdx };
+                            innerLoc = nthChildInner.filterText
+                              ? { method: 'nthChild', childSelector: nthChildInner.childSelector, filterText: nthChildInner.filterText, inner: cellInner }
+                              : { method: 'nthChild', childSelector: nthChildInner.childSelector, nthIndex: nthChildInner.nthIndex, inner: cellInner };
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
               const displayText = locatorInfoToText(containerInfo.locatorInfo) + '.' + locatorInfoToText(innerLoc);
@@ -462,8 +772,12 @@ export function getHighlightInfo(el) {
 }
 
 export const METHOD_COLORS = {
-  role: '#2e7d32', label: '#1565c0', testId: '#6a1b9a', text: '#e65100', css: '#757575', rowCell: '#e65100'
+  role: '#2e7d32', label: '#1565c0', testId: '#6a1b9a', text: '#e65100',
+  placeholder: '#00695c', alt: '#4527a0', title: '#bf360c',
+  css: '#757575', rowCell: '#e65100'
 };
 export const METHOD_BADGES = {
-  role: 'ROLE', label: 'LABEL', testId: 'TEST-ID', text: 'TEXT', css: 'CSS', rowCell: 'TEXT'
+  role: 'ROLE', label: 'LABEL', testId: 'TEST-ID', text: 'TEXT',
+  placeholder: 'PLACEHOLDER', alt: 'ALT', title: 'TITLE',
+  css: 'CSS', rowCell: 'TEXT'
 };

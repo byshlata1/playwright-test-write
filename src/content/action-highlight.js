@@ -4,6 +4,7 @@ import {
   getAccessibleName,
   getHeadingLevel,
   getLabelForFormControl,
+  parentElementOrShadowHost,
 } from './locators.js';
 
 let _actionHighlightBox = null;
@@ -59,6 +60,19 @@ export function findElementByLocatorInfo(info, root) {
       }
       return null;
     }
+    case 'placeholder': {
+      if (!info.placeholder) return null;
+      const sel = 'input[placeholder="' + escapeSelectorAttr(info.placeholder) + '"],textarea[placeholder="' + escapeSelectorAttr(info.placeholder) + '"]';
+      try { return searchRoot.querySelector(sel); } catch (_) { return null; }
+    }
+    case 'alt': {
+      if (!info.alt) return null;
+      try { return searchRoot.querySelector('[alt="' + escapeSelectorAttr(info.alt) + '"]'); } catch (_) { return null; }
+    }
+    case 'title': {
+      if (!info.title) return null;
+      try { return searchRoot.querySelector('[title="' + escapeSelectorAttr(info.title) + '"]'); } catch (_) { return null; }
+    }
     case 'css': {
       try { return searchRoot.querySelector(info.selector); } catch (_) { return null; }
     }
@@ -75,8 +89,17 @@ export function findElementByLocatorInfo(info, root) {
         const ct = (c.tagName && c.tagName.toLowerCase()) || '';
         return tag === '*' || ct === tag;
       });
-      const idx = typeof info.nthIndex === 'number' && info.nthIndex >= 0 ? info.nthIndex : 0;
-      const row = direct[idx];
+      let row;
+      if (info.filterText) {
+        row = null;
+        for (let i = 0; i < direct.length; i++) {
+          const t = direct[i].textContent && direct[i].textContent.trim().replace(/\s+/g, ' ');
+          if (t && t.indexOf(info.filterText) >= 0) { row = direct[i]; break; }
+        }
+      } else {
+        const idx = typeof info.nthIndex === 'number' && info.nthIndex >= 0 ? info.nthIndex : 0;
+        row = direct[idx];
+      }
       if (!row) return null;
       if (info.inner) return findElementByLocatorInfo(info.inner, row);
       return row;

@@ -1,5 +1,10 @@
-import { state } from './state.js';
+import { state, restoreState, persistState } from './state.js';
 import { sendHighlightState, panelPorts, panelVisible, notifyPanel } from './utils.js';
+
+chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' });
+restoreState().then(() => {
+  console.log('[PW Recorder] State restored, recording:', state.recording);
+});
 import {
   handleStartRecording,
   handleStopRecording,
@@ -16,6 +21,7 @@ import {
   handleHighlightActionElement,
   handleUnhighlightActionElement,
   handleRequestHighlightState,
+  handleSpaNavigation,
   handleClearAll,
 } from './handlers.js';
 
@@ -29,8 +35,11 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   }
   const url = details.url;
   if (!url || url.startsWith('chrome') || url.startsWith('edge') || url.startsWith('about:')) return;
+  const lastAction = state.actions[state.actions.length - 1];
+  if (lastAction && lastAction.type === 'goto' && lastAction.url === url) return;
   const gotoAction = { type: 'goto', url, ts: Date.now() };
   state.actions.push(gotoAction);
+  persistState();
   notifyPanel({ type: 'ACTION_ADDED', action: gotoAction });
   setTimeout(() => sendHighlightState(details.tabId), 300);
 });
@@ -74,6 +83,7 @@ const messageHandlers = {
   HIGHLIGHT_ACTION_ELEMENT: handleHighlightActionElement,
   UNHIGHLIGHT_ACTION_ELEMENT: handleUnhighlightActionElement,
   REQUEST_HIGHLIGHT_STATE: handleRequestHighlightState,
+  SPA_NAVIGATION: handleSpaNavigation,
   CLEAR_ALL: handleClearAll,
 };
 

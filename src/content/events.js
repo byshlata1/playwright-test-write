@@ -1,6 +1,6 @@
 import { contentState } from './state.js';
 import { getElementUnderPoint } from './overlay.js';
-import { generateLocatorInfo, getHighlightInfo, locatorInfoToText } from './locators.js';
+import { generateLocatorInfo, getHighlightInfo, locatorInfoToText, parentElementOrShadowHost } from './locators.js';
 
 function sendAction(data) {
   let locatorStr = '';
@@ -42,13 +42,14 @@ export function getClickTarget(element) {
     }
     if (el.hasAttribute && (el.hasAttribute('onclick') || el.hasAttribute('tabindex'))) return el;
     if (hasTestId && !/^(tbody|thead|table|main|section|article)$/.test(tag)) return el;
+    if (tag === 'table' || tag === 'tbody' || tag === 'thead') break;
     if (!classCandidate) {
       const cls = (el.className && typeof el.className === 'string' ? el.className : '') || '';
       if ((tag === 'div' || tag === 'span') && /btn|button|cta|action/.test(cls.toLowerCase())) {
         classCandidate = el;
       }
     }
-    el = el.parentElement;
+    el = parentElementOrShadowHost(el);
     if (el && (el.tagName === 'BODY' || el.tagName === 'HTML')) break;
   }
   return classCandidate;

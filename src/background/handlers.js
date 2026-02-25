@@ -1,4 +1,4 @@
-import { state } from './state.js';
+import { state, persistState } from './state.js';
 import {
   generateMockFilename,
   isStaticUrl,
@@ -19,6 +19,7 @@ export function handleStartRecording(message, sender, sendResponse) {
   state.lastRequestTs = null;
   state.recordingStartedTs = Date.now();
   state._skipNextNavigation = !!tabId;
+  persistState();
   if (tabId) {
     chrome.tabs.reload(tabId);
     setTimeout(() => sendHighlightState(tabId), 500);
@@ -31,6 +32,7 @@ export function handleStartRecording(message, sender, sendResponse) {
 
 export function handleStopRecording(message, sender, sendResponse) {
   state.recording = false;
+  persistState();
   const tabId = message.tabId ?? state._lastTabId;
   if (tabId) {
     chrome.tabs.sendMessage(tabId, { type: 'STOP_RECORDING' }).catch(e => console.warn('[PW Recorder]', e));
@@ -67,6 +69,7 @@ export function handleRequestCaptured(message, sender, sendResponse) {
   }
   state.lastRequestTs = Date.now();
   state.actions.push({ type: 'route', url, method: mockData.method, failed: !success, ts: Date.now() });
+  persistState();
   notifyPanel({ type: 'MOCK_ADDED', mock: mockData });
 
   sendResponse({ received: true });
@@ -77,6 +80,7 @@ export function handleAddAction(message, sender, sendResponse) {
   if (state.recording && message.data) {
     const action = { ...message.data, ts: Date.now() };
     state.actions.push(action);
+    persistState();
     notifyPanel({ type: 'ACTION_ADDED', action });
   }
   sendResponse({ added: true });
@@ -96,6 +100,7 @@ export function handleInsertExpectRequest(message, sender, sendResponse) {
     ts: Date.now(),
   };
   state.actions.splice(index + 1, 0, expectAction);
+  persistState();
   notifyPanel({ type: 'ACTION_ADDED' });
   sendResponse({ ok: true });
   return true;
@@ -105,6 +110,7 @@ export function handleRemoveAction(message, sender, sendResponse) {
   const index = message.index;
   if (typeof index === 'number' && index >= 0 && index < state.actions.length) {
     state.actions.splice(index, 1);
+    persistState();
     notifyPanel({ type: 'ACTION_ADDED' });
   }
   sendResponse({ ok: true });
@@ -120,6 +126,7 @@ export function handleAddExpect(message, sender, sendResponse) {
   const action = state.actions[actionIndex];
   if (!action.expects) action.expects = [];
   action.expects.push(...(Array.isArray(expects) ? expects : [expects]));
+  persistState();
   notifyPanel({ type: 'ACTION_ADDED' });
   sendResponse({ ok: true });
   return true;
@@ -134,6 +141,7 @@ export function handleRemoveExpect(message, sender, sendResponse) {
   const action = state.actions[actionIndex];
   if (action.expects && typeof expectIndex === 'number' && expectIndex >= 0 && expectIndex < action.expects.length) {
     action.expects.splice(expectIndex, 1);
+    persistState();
     notifyPanel({ type: 'ACTION_ADDED' });
   }
   sendResponse({ ok: true });
@@ -143,6 +151,7 @@ export function handleRemoveExpect(message, sender, sendResponse) {
 export function handleAddToTest(message, sender, sendResponse) {
   state.testSteps.push(...state.actions);
   state.actions = [];
+  persistState();
   sendResponse({ ok: true });
   return true;
 }
@@ -180,6 +189,7 @@ export function handleUpdateMock(message, sender, sendResponse) {
       mock.status = newStatus;
     }
     state.mocks.set(key, mock);
+    persistState();
     notifyPanel({ type: 'MOCK_UPDATED', mock });
   }
   sendResponse({ updated: true });
@@ -229,6 +239,25 @@ export function handleRequestHighlightState(message, sender, sendResponse) {
   return true;
 }
 
+export function handleSpaNavigation(message, sender, sendResponse) {
+  if (!state.recording) { sendResponse({ ok: true }); return true; }
+  const url = message.url;
+  if (!url) { sendResponse({ ok: true }); return true; }
+
+  const lastAction = state.actions[state.actions.length - 1];
+  if (lastAction && lastAction.type === 'goto' && lastAction.url === url) {
+    sendResponse({ ok: true });
+    return true;
+  }
+
+  const gotoAction = { type: 'goto', url, ts: Date.now() };
+  state.actions.push(gotoAction);
+  persistState();
+  notifyPanel({ type: 'ACTION_ADDED', action: gotoAction });
+  sendResponse({ ok: true });
+  return true;
+}
+
 export function handleClearAll(message, sender, sendResponse) {
   state.recording = false;
   state.startUrl = null;
@@ -237,6 +266,7 @@ export function handleClearAll(message, sender, sendResponse) {
   state.mocks = new Map();
   state.failedRequests = [];
   state._skipNextNavigation = false;
+  persistState();
   sendResponse({ cleared: true });
   return true;
 }

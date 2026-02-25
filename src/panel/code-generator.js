@@ -60,6 +60,10 @@ export function locatorMethodStr(info) {
   let suffix = '';
   if (info.method === 'nthChild') {
     const sel = info.childSelector || '> *';
+    if (info.filterText) {
+      const inner = info.inner ? '.' + locatorMethodStr(info.inner) : '';
+      return `locator('${escapeForPlaywright(sel)}').filter({ hasText: '${escapeForPlaywright(info.filterText)}' })` + inner;
+    }
     const n = typeof info.nthIndex === 'number' ? `.nth(${info.nthIndex})` : '';
     const inner = info.inner ? '.' + locatorMethodStr(info.inner) : '';
     return `locator('${escapeForPlaywright(sel)}')` + n + inner;
@@ -79,6 +83,12 @@ export function locatorMethodStr(info) {
       return info.label ? `getByLabel('${escapeForPlaywright(info.label)}')` + suffix : '';
     case 'testId':
       return info.value ? `getByTestId('${escapeForPlaywright(info.value)}')` + suffix : '';
+    case 'placeholder':
+      return info.placeholder ? `getByPlaceholder('${escapeForPlaywright(info.placeholder)}')` + suffix : '';
+    case 'alt':
+      return info.alt ? `getByAltText('${escapeForPlaywright(info.alt)}')` + suffix : '';
+    case 'title':
+      return info.title ? `getByTitle('${escapeForPlaywright(info.title)}')` + suffix : '';
     case 'text':
       return info.text ? `getByText('${escapeForPlaywright(info.text)}', { exact: true })` + suffix : '';
     case 'css':
