@@ -57,11 +57,16 @@ export function clearAll() {
     .catch((e) => showToast(e?.message || 'Error'));
 }
 
-export function generateCode() {
+export async function copyCode() {
   const testName = document.getElementById('input-testname').value || 'recorded-test';
   const code = generateTestCode(testName, currentState.mocks, currentState.testSteps, currentState.startUrl);
   document.getElementById('code-preview').textContent = code;
-  showToast('Select code and Ctrl+C to copy');
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('Code copied');
+  } catch (e) {
+    showToast(e?.message || 'Copy failed');
+  }
 }
 
 export async function saveToFolder() {

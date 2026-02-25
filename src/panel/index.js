@@ -2,7 +2,7 @@ import { currentState, sendToBackground, refreshState, setUIUpdater, showToast }
 import { updateUI } from './render.js';
 import {
   startRecording, stopRecording, clearAll, addToTest,
-  onCaptureAllChange, onTestIdHighlightChange, generateCode, saveToFolder,
+  onCaptureAllChange, onTestIdHighlightChange, copyCode, saveToFolder,
 } from './actions.js';
 import { saveMockEdit, closeEditModal, saveExpectModal, closeExpectModal, addExpectRow, openExpectModal, openEditModal } from './modals.js';
 
@@ -19,7 +19,7 @@ function setupEventListeners() {
     if (cb) cb.checked = !!r.captureAllClicks;
   });
   document.getElementById('checkbox-testid-highlight').addEventListener('change', onTestIdHighlightChange);
-  document.getElementById('btn-generate').addEventListener('click', generateCode);
+  document.getElementById('btn-copy').addEventListener('click', copyCode);
   document.getElementById('btn-save').addEventListener('click', saveToFolder);
   document.getElementById('btn-save-mock').addEventListener('click', saveMockEdit);
   document.getElementById('btn-cancel-edit').addEventListener('click', closeEditModal);
